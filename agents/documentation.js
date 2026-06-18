@@ -1,87 +1,63 @@
 const Anthropic = require('@anthropic-ai/sdk');
 
-const SYSTEM_PROMPT = `You are a Technical Product Writer and System Visualization expert.
+const SYSTEM_PROMPT = `You are a Technical Product Writer.
 
-Your job is to take ALL previous agent outputs (discovery, domain/workflow, and architecture) and
-convert them into:
-- Product Requirements Document (PRD)
-- System explanation
-- Architecture diagram (Mermaid format)
-- Feature breakdown
+Your job is to take all previous agent outputs and produce concise final documentation.
 
-RULES:
-- Do NOT introduce new logic, users, entities, or features
-- Only summarize and structure the information already present in previous_output
-- Ensure clarity for both technical and non-technical stakeholders
+You must produce:
+- PRD_SUMMARY: 3 sentences max. What it is, who it's for, core value.
+- SYSTEM_EXPLANATION: 3 sentences max. How it works end-to-end in plain English.
+- FEATURE_BREAKDOWN: Exactly 8 features. Each: feature (name), badge (Core/Admin/Premium/System), description (1 sentence), service (which service owns it).
+- SYSTEM_FLOW: Exactly 5 steps. Each: step (number), from (string), to (string), action (1 sentence).
+- ARCHITECTURE_DIAGRAM_MERMAID: Valid Mermaid graph TD string. Max 12 nodes. Use \\n for line breaks.
 
-INTER-AGENT DATA RULES:
-You will receive a merged JSON object under the key "previous_output" that contains the combined
-outputs of ALL previous agents (Agent 1, Agent 2, and Agent 3).
-This is your ONLY source of truth.
-- Do NOT invent anything not present in previous_output.
-- Reference users, workflows, entities, modules, and APIs from previous_output when writing the PRD.
-
-MERMAID DIAGRAM RULES:
-- The "architecture_diagram_mermaid" value must be a single valid string using "\\n" for line breaks.
-- Use "graph TD" or "flowchart TD" syntax only.
-- Node IDs must contain only letters, numbers, and underscores (no spaces or special characters).
-- Display labels with spaces/special characters must be wrapped in square brackets, e.g. NodeID[Display Label].
-- External services must be represented as NodeID[(Display Label)] (cylinder/database shape).
-- Validate that every edge references a defined node ID before finalizing.
-
-VALIDATION RULES:
-- Your output MUST be valid JSON matching the exact schema below.
-- If you cannot populate a field, return an empty array [] or empty string "" — never null, never omit the key.
-- If your first attempt would not be valid JSON, silently correct it before responding.
-- Never wrap output in markdown code fences (no \`\`\`json).
-- Never include explanations, comments, or text outside the JSON object.
-
-OUTPUT CONSTRAINTS:
-- Output ONLY the raw JSON object.
-- No markdown code fences.
-- No preamble ("Here is the output:").
-- No postamble ("Let me know if...").
-- The first character of your response must be "{" and the last character must be "}".
+STRICT RULES:
+- 1 sentence max per description field
+- No bullet points inside strings
+- No markdown inside JSON strings
+- Never wrap output in code fences
+- First character must be "{" and last must be "}"
 
 OUTPUT FORMAT (STRICT JSON):
 {
-  "prd_summary": "",
-  "feature_breakdown": [],
-  "architecture_diagram_mermaid": "",
-  "system_explanation": ""
+  "prd_summary": "string",
+  "system_explanation": "string",
+  "feature_breakdown": [
+    { "feature": "string", "badge": "string", "description": "string", "service": "string" }
+  ],
+  "system_flow": [
+    { "step": 1, "from": "string", "to": "string", "action": "string" }
+  ],
+  "architecture_diagram_mermaid": "string"
 }`;
 
 const EMPTY_SCHEMA = {
   prd_summary: '',
-  feature_breakdown: [],
-  architecture_diagram_mermaid: '',
   system_explanation: '',
+  feature_breakdown: [],
+  system_flow: [],
+  architecture_diagram_mermaid: '',
 };
 
 async function runDocumentationAgent(mergedOutput) {
   const client = new Anthropic();
-
-  const userMessage = `previous_output: ${JSON.stringify(mergedOutput)}\n\nThis merged output contains all outputs from Agents 1, 2, and 3. Produce your documentation output.`;
-
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 4000,
+    max_tokens: 3000,
     system: SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: userMessage }],
+    messages: [{
+      role: 'user',
+      content: `previous_output: ${JSON.stringify(mergedOutput)}\n\nProduce concise documentation. Max 1 sentence per description. Max 8 features. Max 5 flow steps. Be specific to this product idea.`
+    }],
   });
 
   const rawText = response.content[0].text;
-
   try {
     return JSON.parse(rawText);
   } catch (e) {
     const cleaned = rawText.replace(/```json|```/g, '').trim();
-    try {
-      return JSON.parse(cleaned);
-    } catch (e2) {
-      console.error('Documentation Agent: Failed to parse JSON response', e2.message);
-      return EMPTY_SCHEMA;
-    }
+    try { return JSON.parse(cleaned); }
+    catch (e2) { console.error('Documentation Agent parse error:', e2.message); return EMPTY_SCHEMA; }
   }
 }
 

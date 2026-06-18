@@ -2,86 +2,98 @@ const Anthropic = require('@anthropic-ai/sdk');
 
 const SYSTEM_PROMPT = `You are a Senior Solution Architect.
 
-Your ONLY job is to convert workflows and domain models into system architecture.
+Your ONLY job is to convert domain models into a detailed system architecture.
 
-You must define:
-- System modules
-- Backend services
-- APIs
-- Data storage components
-- External integrations
-- System boundaries
+You must produce:
+- SERVICES: Exactly 6-8 services. Group them as: Core Services, Business Services, or Support Services.
+  Each service must have:
+    - name: string
+    - group: "Core Services" | "Business Services" | "Support Services"
+    - description: string (1-2 sentences on what it does)
+    - apis: array of 3-6 API endpoints, each with: method (GET/POST/PUT/DELETE/PATCH), route (string), purpose (string)
+    - dependencies: array of other service names this depends on
+    - entities: array of domain entity names this service owns or uses
+
+- INTEGRATIONS: Exactly 3-5 external integrations. Each has: name, purpose (1 sentence), type ("payment" | "email" | "auth" | "storage" | "analytics" | "other")
+
+- SYSTEM_BOUNDARIES: Exactly 3-5 system boundary descriptions as plain strings.
+
+- DATA_LAYER: Object with:
+    - database: string (e.g. "PostgreSQL")
+    - cache: string (e.g. "Redis") or ""
+    - storage: string (e.g. "AWS S3") or ""
+    - description: string (1-2 sentences on data strategy)
 
 RULES:
-- Do NOT repeat workflows or user journeys
-- Do NOT generate PRDs or documentation
-- Focus only on technical system design
-- Think in scalable backend architecture terms
-- Be concise — keep each array item to 1-2 sentences maximum
-- Limit each array to a maximum of 6 items
+- Do NOT repeat workflows or PRD content
+- Think in scalable backend architecture
+- Be specific to the product idea in previous_output
+- Max 6 items per array to stay concise
 
 INTER-AGENT DATA RULES:
-You will receive the previous agent's output as JSON under the key "previous_output".
-This is your ONLY source of truth.
-- Do NOT invent new modules or integrations not implied by previous_output.
-- Do NOT discard or omit information from previous_output without justification.
-- Build strictly on top of what previous_output provides.
+- You receive previous agent output under "previous_output"
+- Build strictly on top of it
+- Do not invent services not implied by the domain model
 
 VALIDATION RULES:
-- Your output MUST be valid JSON matching the exact schema below.
-- If you cannot populate a field, return an empty array [] or empty string "" — never null, never omit the key.
-- If your first attempt would not be valid JSON, silently correct it before responding.
-- Never wrap output in markdown code fences (no \`\`\`json).
-- Never include explanations, comments, or text outside the JSON object.
-
-OUTPUT CONSTRAINTS:
-- Output ONLY the raw JSON object.
-- No markdown code fences.
-- No preamble ("Here is the output:").
-- No postamble ("Let me know if...").
-- The first character of your response must be "{" and the last character must be "}".
+- Output MUST be valid JSON matching the schema below
+- Never use null — use empty string or empty array instead
+- Never wrap in markdown code fences
+- First character must be "{" and last must be "}"
 
 OUTPUT FORMAT (STRICT JSON):
 {
-  "modules": [],
-  "services": [],
-  "apis": [],
-  "data_models": [],
-  "integrations": [],
-  "system_boundaries": []
+  "services": [
+    {
+      "name": "string",
+      "group": "string",
+      "description": "string",
+      "apis": [
+        { "method": "string", "route": "string", "purpose": "string" }
+      ],
+      "dependencies": ["string"],
+      "entities": ["string"]
+    }
+  ],
+  "integrations": [
+    { "name": "string", "purpose": "string", "type": "string" }
+  ],
+  "system_boundaries": ["string"],
+  "data_layer": {
+    "database": "string",
+    "cache": "string",
+    "storage": "string",
+    "description": "string"
+  }
 }`;
 
 const EMPTY_SCHEMA = {
-  modules: [],
   services: [],
-  apis: [],
-  data_models: [],
   integrations: [],
   system_boundaries: [],
+  data_layer: { database: '', cache: '', storage: '', description: '' },
 };
 
 async function runArchitectureAgent(previousOutput) {
   const client = new Anthropic();
-
-  const userMessage = `previous_output: ${JSON.stringify(previousOutput)}\n\nProcess this and produce your output. Be concise — max 6 items per array, max 2 sentences per item.`;
-
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 5000,
+    max_tokens: 4000,
     system: SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: userMessage }],
+    messages: [{
+      role: 'user',
+      content: `previous_output: ${JSON.stringify(previousOutput)}\n\nProduce the full system architecture. Be specific to this product idea. Max 6 items per array. Max 5 APIs per service. Keep all descriptions to 1 sentence max. Be concise — do not over-explain.`
+    }],
   });
 
   const rawText = response.content[0].text;
-
   try {
     return JSON.parse(rawText);
   } catch (e) {
     const cleaned = rawText.replace(/```json|```/g, '').trim();
-    try {
-      return JSON.parse(cleaned);
-    } catch (e2) {
-      console.error('Architecture Agent: Failed to parse JSON response', e2.message);
+    try { return JSON.parse(cleaned); }
+    catch (e2) {
+      console.error('Architecture Agent parse error:', e2.message);
       return EMPTY_SCHEMA;
     }
   }
