@@ -2,7 +2,7 @@ require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
-const { runPipeline } = require('./orchestrator');
+const { runPipeline, applyArchitectureChoice } = require('./orchestrator');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -46,6 +46,31 @@ app.post('/api/blueprint', async (req, res) => {
     return res.status(200).json(blueprint);
   } catch (error) {
     console.error('[Server] Pipeline error:', error.message);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/apply-architecture-choice
+app.post('/api/apply-architecture-choice', async (req, res) => {
+  const { blueprint, constraint } = req.body;
+
+  if (!blueprint || typeof blueprint !== 'object') {
+    return res.status(400).json({
+      error: 'blueprint is required and must be an object',
+    });
+  }
+
+  if (!constraint || typeof constraint !== 'string' || constraint.trim() === '') {
+    return res.status(400).json({
+      error: 'constraint is required and must be a non-empty string',
+    });
+  }
+
+  try {
+    const updatedBlueprint = await applyArchitectureChoice(blueprint, constraint.trim());
+    return res.status(200).json(updatedBlueprint);
+  } catch (error) {
+    console.error('[Server] Apply architecture choice error:', error.message);
     return res.status(500).json({ error: error.message });
   }
 });

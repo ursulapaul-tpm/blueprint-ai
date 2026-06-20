@@ -82,7 +82,9 @@ async function runArchitectureAgent(previousOutput) {
     system: SYSTEM_PROMPT,
     messages: [{
       role: 'user',
-      content: `previous_output: ${JSON.stringify(previousOutput)}\n\nProduce the full system architecture. Be specific to this product idea. Max 6 items per array. Max 5 APIs per service. Keep all descriptions to 1 sentence max. Be concise — do not over-explain.`
+      content: previousOutput.architectural_constraint
+        ? `previous_output: ${JSON.stringify(previousOutput)}\n\nIMPORTANT CONSTRAINT: ${previousOutput.architectural_constraint}\n\nRe-produce the full system architecture honoring this constraint exactly. Update the database/service/pattern as specified, and adjust all dependent services, APIs, and integrations accordingly to remain consistent with this choice. Be specific to this product idea. Max 6 items per array. Max 5 APIs per service. Keep all descriptions to 1 sentence max.`
+        : `previous_output: ${JSON.stringify(previousOutput)}\n\nProduce the full system architecture. Be specific to this product idea. Max 6 items per array. Max 5 APIs per service. Keep all descriptions to 1 sentence max. Be concise — do not over-explain.`
     }],
   });
 
