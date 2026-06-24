@@ -8,7 +8,7 @@ const path = require('path');
 const { runPipeline, applyArchitectureChoice } = require('./orchestrator');
 const { parseDocument } = require('./utils/parseDocument');
 const { extractIdeaFromDocument } = require('./agents/extraction');
-const { saveBlueprint, getHistoryForDevice, deleteBlueprint, saveFeedback } = require('./db');
+const { saveBlueprint, getHistoryForDevice, deleteBlueprint, saveFeedback, getAllFeedback } = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -242,6 +242,27 @@ app.post('/api/feedback', async (req, res) => {
     return res.status(200).json({ id, success: true });
   } catch (error) {
     console.error('[Server] Feedback save error:', error.message);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/admin/feedback — password-protected, returns all feedback
+app.post('/api/admin/feedback', async (req, res) => {
+  const { password } = req.body;
+  const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+
+  if (!ADMIN_PASSWORD) {
+    return res.status(500).json({ error: 'Admin access is not configured on the server.' });
+  }
+  if (!password || password !== ADMIN_PASSWORD) {
+    return res.status(401).json({ error: 'Incorrect password.' });
+  }
+
+  try {
+    const feedback = await getAllFeedback();
+    return res.status(200).json({ feedback });
+  } catch (error) {
+    console.error('[Server] Admin feedback fetch error:', error.message);
     return res.status(500).json({ error: error.message });
   }
 });

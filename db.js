@@ -79,4 +79,20 @@ async function saveFeedback(deviceId, rating, message, pageContext) {
   return result.rows[0].id;
 }
 
-module.exports = { saveBlueprint, getHistoryForDevice, deleteBlueprint, saveFeedback };
+async function getAllFeedback() {
+  const result = await pool.query(
+    `SELECT id, device_id, rating, message, page_context, created_at
+     FROM feedback
+     ORDER BY created_at DESC`
+  );
+  return result.rows.map(row => ({
+    id: row.id,
+    deviceId: row.device_id,
+    rating: row.rating,
+    message: row.message,
+    pageContext: row.page_context,
+    createdAt: row.created_at,
+  }));
+}
+
+module.exports = { saveBlueprint, getHistoryForDevice, deleteBlueprint, saveFeedback, getAllFeedback };
