@@ -17,7 +17,9 @@ RULES:
 - Every alternative must be a real, named, plausible technology or pattern — not vague placeholders.
 - All reasoning must be 100% specific to the product idea and architecture given in previous_output. No generic boilerplate.
 - Typical decision points to look for: primary database (SQL vs NoSQL vs specific engines), caching layer (Redis vs none vs CDN), service architecture (monolith vs microservices), communication pattern (REST vs GraphQL vs event-driven), file storage strategy, search/indexing strategy if relevant.
-- Produce between 2 and 5 decision points total, only for ones that are real and relevant.
+- Produce between 2 and 4 decision points total, only for ones that are real and relevant.
+- Be concise: chosen.reasoning max 2 sentences, alternative.reasoning max 1 sentence, alternative.tradeoff max 2 sentences.
+- Maximum 3 alternatives per decision.
 
 VALIDATION RULES:
 - Output MUST be valid JSON matching the schema below
@@ -46,7 +48,7 @@ async function runReasoningAgent(previousOutput) {
   const client = new Anthropic();
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 4000,
+    max_tokens: 2500,
     system: SYSTEM_PROMPT,
     messages: [{
       role: 'user',

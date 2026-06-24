@@ -2,10 +2,28 @@ require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
+const multer = require('multer');
+const fs = require('fs');
+const path = require('path');
 const { runPipeline, applyArchitectureChoice } = require('./orchestrator');
+const { parseDocument } = require('./utils/parseDocument');
+const { extractIdeaFromDocument } = require('./agents/extraction');
+const { saveBlueprint, getHistoryForDevice, deleteBlueprint } = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Multer config — temp storage for uploaded documents
+const upload = multer({
+  dest: path.join(__dirname, 'uploads'),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB max
+  fileFilter: (req, file, cb) => {
+    const allowedExt = ['.pdf', '.docx', '.txt', '.md'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (allowedExt.includes(ext)) cb(null, true);
+    else cb(new Error('Unsupported file type. Only PDF, DOCX, TXT, and MD files are allowed.'));
+  },
+});
 
 // Middleware
 app.use(cors());
@@ -25,7 +43,7 @@ app.get('/health', (req, res) => {
 
 // POST /api/blueprint
 app.post('/api/blueprint', async (req, res) => {
-  const { productIdea } = req.body;
+  const { productIdea, additionalContext } = req.body;
 
   // Validate presence and type
   if (!productIdea || typeof productIdea !== 'string' || productIdea.trim() === '') {
@@ -41,13 +59,135 @@ app.post('/api/blueprint', async (req, res) => {
     });
   }
 
+  if (additionalContext && typeof additionalContext === 'string' && additionalContext.length > 1000) {
+    return res.status(400).json({
+      error: 'additionalContext must not exceed 1000 characters',
+    });
+  }
+
   try {
-    const blueprint = await runPipeline(productIdea.trim());
+    let finalIdea = productIdea.trim();
+    if (additionalContext && additionalContext.trim()) {
+      finalIdea = `${finalIdea}\n\nAdditional context: ${additionalContext.trim()}`;
+    }
+    const blueprint = await runPipeline(finalIdea);
     return res.status(200).json(blueprint);
   } catch (error) {
     console.error('[Server] Pipeline error:', error.message);
     return res.status(500).json({ error: error.message });
   }
+});
+
+// POST /api/extract-document
+app.post('/api/extract-document', upload.single('document'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No document file was provided.' });
+  }
+
+  const filePath = req.file.path;
+
+  try {
+    const rawText = await parseDocument(filePath, req.file.originalname);
+
+    if (!rawText || rawText.trim().length < 20) {
+      return res.status(400).json({
+        error: 'Could not extract meaningful text from this document. It may be empty, scanned, or image-based.',
+      });
+    }
+
+    const extractedIdea = await extractIdeaFromDocument(rawText);
+
+    if (extractedIdea === 'NOT_A_PRODUCT_IDEA') {
+      return res.status(400).json({
+        error: 'This document does not appear to describe a product or software idea.',
+      });
+    }
+
+    return res.status(200).json({ extractedIdea });
+  } catch (error) {
+    console.error('[Server] Document extraction error:', error.message);
+    return res.status(500).json({ error: error.message });
+  } finally {
+    // Clean up the temp uploaded file
+    fs.unlink(filePath, (err) => {
+      if (err) console.error('[Server] Failed to delete temp file:', err.message);
+    });
+  }
+});
+
+// POST /api/history/save
+app.post('/api/history/save', async (req, res) => {
+  const { deviceId, idea, blueprint } = req.body;
+
+  if (!deviceId || typeof deviceId !== 'string' || deviceId.trim() === '') {
+    return res.status(400).json({ error: 'deviceId is required and must be a non-empty string' });
+  }
+  if (!idea || typeof idea !== 'string') {
+    return res.status(400).json({ error: 'idea is required and must be a string' });
+  }
+  if (!blueprint || typeof blueprint !== 'object') {
+    return res.status(400).json({ error: 'blueprint is required and must be an object' });
+  }
+
+  try {
+    const id = await saveBlueprint(deviceId.trim(), idea, blueprint);
+    return res.status(200).json({ id });
+  } catch (error) {
+    console.error('[Server] History save error:', error.message);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/history/:deviceId
+app.get('/api/history/:deviceId', async (req, res) => {
+  const { deviceId } = req.params;
+
+  if (!deviceId || deviceId.trim() === '') {
+    return res.status(400).json({ error: 'deviceId is required' });
+  }
+
+  try {
+    const history = await getHistoryForDevice(deviceId.trim());
+    return res.status(200).json({ history });
+  } catch (error) {
+    console.error('[Server] History fetch error:', error.message);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE /api/history/:id
+app.delete('/api/history/:id', async (req, res) => {
+  const { id } = req.params;
+  const { deviceId } = req.body;
+
+  if (!deviceId || typeof deviceId !== 'string' || deviceId.trim() === '') {
+    return res.status(400).json({ error: 'deviceId is required in the request body' });
+  }
+
+  try {
+    const deleted = await deleteBlueprint(Number(id), deviceId.trim());
+    if (!deleted) {
+      return res.status(404).json({ error: 'Blueprint not found or does not belong to this device' });
+    }
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    console.error('[Server] History delete error:', error.message);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// Multer error handler (file too large, wrong type, etc.)
+app.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ error: 'File too large. Maximum size is 10MB.' });
+    }
+    return res.status(400).json({ error: err.message });
+  }
+  if (err) {
+    return res.status(400).json({ error: err.message });
+  }
+  next();
 });
 
 // POST /api/apply-architecture-choice

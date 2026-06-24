@@ -1,2 +1,10 @@
+# node_modules/
+# .env
+# uploads/*
+# !uploads/.gitkeep
+# cornea.db
+
 node_modules/
 .env
+uploads/*
+!uploads/.gitkeep
