@@ -20,6 +20,18 @@ async function initDb() {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_device_id ON blueprints(device_id);
   `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS feedback (
+      id SERIAL PRIMARY KEY,
+      device_id TEXT,
+      rating INTEGER,
+      message TEXT,
+      page_context TEXT,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+  `);
+
   console.log('[DB] PostgreSQL connected and schema ready.');
 }
 
@@ -59,4 +71,12 @@ async function deleteBlueprint(id, deviceId) {
   return result.rowCount > 0;
 }
 
-module.exports = { saveBlueprint, getHistoryForDevice, deleteBlueprint };
+async function saveFeedback(deviceId, rating, message, pageContext) {
+  const result = await pool.query(
+    `INSERT INTO feedback (device_id, rating, message, page_context) VALUES ($1, $2, $3, $4) RETURNING id`,
+    [deviceId || null, rating || null, message || null, pageContext || null]
+  );
+  return result.rows[0].id;
+}
+
+module.exports = { saveBlueprint, getHistoryForDevice, deleteBlueprint, saveFeedback };

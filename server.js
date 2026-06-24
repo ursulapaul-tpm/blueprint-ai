@@ -8,7 +8,7 @@ const path = require('path');
 const { runPipeline, applyArchitectureChoice } = require('./orchestrator');
 const { parseDocument } = require('./utils/parseDocument');
 const { extractIdeaFromDocument } = require('./agents/extraction');
-const { saveBlueprint, getHistoryForDevice, deleteBlueprint } = require('./db');
+const { saveBlueprint, getHistoryForDevice, deleteBlueprint, saveFeedback } = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -172,6 +172,29 @@ app.delete('/api/history/:id', async (req, res) => {
     return res.status(200).json({ success: true });
   } catch (error) {
     console.error('[Server] History delete error:', error.message);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/feedback
+app.post('/api/feedback', async (req, res) => {
+  const { deviceId, rating, message, pageContext } = req.body;
+
+  if (!message || typeof message !== 'string' || message.trim() === '') {
+    return res.status(400).json({ error: 'message is required and must be a non-empty string' });
+  }
+  if (message.length > 2000) {
+    return res.status(400).json({ error: 'message must not exceed 2000 characters' });
+  }
+  if (rating !== undefined && rating !== null && (typeof rating !== 'number' || rating < 1 || rating > 5)) {
+    return res.status(400).json({ error: 'rating must be a number between 1 and 5' });
+  }
+
+  try {
+    const id = await saveFeedback(deviceId, rating, message.trim(), pageContext);
+    return res.status(200).json({ id, success: true });
+  } catch (error) {
+    console.error('[Server] Feedback save error:', error.message);
     return res.status(500).json({ error: error.message });
   }
 });
