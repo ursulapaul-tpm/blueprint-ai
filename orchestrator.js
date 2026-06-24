@@ -4,30 +4,76 @@ const { runArchitectureAgent } = require('./agents/architecture');
 const { runDocumentationAgent } = require('./agents/documentation');
 const { runReasoningAgent } = require('./agents/reasoning');
 
-async function runPipeline(productIdea) {
+// Extracts a few real, human-readable highlights from an agent's output
+function extractHighlights(agentIndex, output) {
+  switch (agentIndex) {
+    case 1: // Discovery
+      return [
+        ...(output.users || []).slice(0, 3).map(u => `Found user: ${u.name}, ${u.role}`),
+        ...(output.features || []).slice(0, 2).map(f => `Identified feature: ${f.name}`),
+      ].slice(0, 4);
+    case 2: // Workflow + Domain
+      return [
+        ...(output.domain_entities || []).slice(0, 3).map(e => `Mapped entity: ${e.name}`),
+        ...(output.workflows || []).slice(0, 2).map(w => `Defined workflow: ${w.name}`),
+      ].slice(0, 4);
+    case 3: // Architecture
+      return [
+        ...(output.services || []).slice(0, 3).map(s => `Designed service: ${s.name}`),
+        output.data_layer?.database ? `Selected database: ${output.data_layer.database}` : null,
+      ].filter(Boolean).slice(0, 4);
+    case 4: // Documentation
+      return [
+        ...(output.feature_breakdown || []).slice(0, 3).map(f => `Documented: ${f.feature}`),
+        output.system_flow?.length ? `Mapped ${output.system_flow.length}-step system flow` : null,
+      ].filter(Boolean).slice(0, 4);
+    case 5: // Reasoning
+      return (output.decisions || []).slice(0, 3).map(d => `Weighed tradeoff: ${d.decision_title}`);
+    default:
+      return [];
+  }
+}
+
+async function runPipeline(productIdea, onProgress) {
+  const emit = (agentIndex, status, highlights = []) => {
+    if (typeof onProgress === 'function') {
+      onProgress({ agentIndex, status, highlights });
+    }
+  };
+
   console.log('[Orchestrator] Starting pipeline...');
 
+  emit(1, 'running');
   console.log('[Orchestrator] Running Agent 1: Discovery...');
   const agent1Output = await runDiscoveryAgent(productIdea);
   console.log('[Orchestrator] Agent 1 complete.');
+  emit(1, 'complete', extractHighlights(1, agent1Output));
 
+  emit(2, 'running');
   console.log('[Orchestrator] Running Agent 2: Workflow + Domain...');
   const agent2Output = await runWorkflowDomainAgent(agent1Output);
   console.log('[Orchestrator] Agent 2 complete.');
+  emit(2, 'complete', extractHighlights(2, agent2Output));
 
+  emit(3, 'running');
   console.log('[Orchestrator] Running Agent 3: Architecture...');
   const agent3Output = await runArchitectureAgent(agent2Output);
   console.log('[Orchestrator] Agent 3 complete.');
+  emit(3, 'complete', extractHighlights(3, agent3Output));
 
   const mergedForAgent4 = { ...agent1Output, ...agent2Output, ...agent3Output };
 
+  emit(4, 'running');
   console.log('[Orchestrator] Running Agent 4: Documentation...');
   const agent4Output = await runDocumentationAgent(mergedForAgent4);
   console.log('[Orchestrator] Agent 4 complete.');
+  emit(4, 'complete', extractHighlights(4, agent4Output));
 
+  emit(5, 'running');
   console.log('[Orchestrator] Running Agent 5: Architecture Reasoning...');
   const agent5Output = await runReasoningAgent(mergedForAgent4);
   console.log('[Orchestrator] Agent 5 complete.');
+  emit(5, 'complete', extractHighlights(5, agent5Output));
 
   const finalBlueprint = {
     users: agent1Output.users || [],

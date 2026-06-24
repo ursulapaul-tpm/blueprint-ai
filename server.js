@@ -78,6 +78,53 @@ app.post('/api/blueprint', async (req, res) => {
   }
 });
 
+// GET /api/blueprint-stream — same pipeline, but streams live progress via Server-Sent Events
+app.get('/api/blueprint-stream', async (req, res) => {
+  const { productIdea, additionalContext } = req.query;
+
+  if (!productIdea || typeof productIdea !== 'string' || productIdea.trim() === '') {
+    return res.status(400).json({ error: 'productIdea is required and must be a non-empty string' });
+  }
+  if (productIdea.length > 2000) {
+    return res.status(400).json({ error: 'productIdea must not exceed 2000 characters' });
+  }
+  if (additionalContext && typeof additionalContext === 'string' && additionalContext.length > 1000) {
+    return res.status(400).json({ error: 'additionalContext must not exceed 1000 characters' });
+  }
+
+  // SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const send = (event, data) => {
+    res.write(`event: ${event}\n`);
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  let finalIdea = productIdea.trim();
+  if (additionalContext && additionalContext.trim()) {
+    finalIdea = `${finalIdea}\n\nAdditional context: ${additionalContext.trim()}`;
+  }
+
+  // Keep the connection alive on platforms that buffer/timeout idle connections (e.g. Render)
+  const keepAlive = setInterval(() => res.write(': ping\n\n'), 15000);
+
+  try {
+    const blueprint = await runPipeline(finalIdea, (progress) => {
+      send('progress', progress);
+    });
+    send('done', blueprint);
+  } catch (error) {
+    console.error('[Server] Stream pipeline error:', error.message);
+    send('error', { error: error.message });
+  } finally {
+    clearInterval(keepAlive);
+    res.end();
+  }
+});
+
 // POST /api/extract-document
 app.post('/api/extract-document', upload.single('document'), async (req, res) => {
   if (!req.file) {
