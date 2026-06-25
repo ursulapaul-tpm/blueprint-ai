@@ -27,9 +27,15 @@ async function initDb() {
       device_id TEXT,
       rating INTEGER,
       message TEXT,
+      role TEXT,
       page_context TEXT,
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
+  `);
+
+  // Add role column if the table already existed before this field was introduced
+  await pool.query(`
+    ALTER TABLE feedback ADD COLUMN IF NOT EXISTS role TEXT;
   `);
 
   console.log('[DB] PostgreSQL connected and schema ready.');
@@ -71,17 +77,17 @@ async function deleteBlueprint(id, deviceId) {
   return result.rowCount > 0;
 }
 
-async function saveFeedback(deviceId, rating, message, pageContext) {
+async function saveFeedback(deviceId, rating, message, pageContext, role) {
   const result = await pool.query(
-    `INSERT INTO feedback (device_id, rating, message, page_context) VALUES ($1, $2, $3, $4) RETURNING id`,
-    [deviceId || null, rating || null, message || null, pageContext || null]
+    `INSERT INTO feedback (device_id, rating, message, page_context, role) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+    [deviceId || null, rating || null, message || null, pageContext || null, role || null]
   );
   return result.rows[0].id;
 }
 
 async function getAllFeedback() {
   const result = await pool.query(
-    `SELECT id, device_id, rating, message, page_context, created_at
+    `SELECT id, device_id, rating, message, role, page_context, created_at
      FROM feedback
      ORDER BY created_at DESC`
   );
@@ -90,6 +96,7 @@ async function getAllFeedback() {
     deviceId: row.device_id,
     rating: row.rating,
     message: row.message,
+    role: row.role,
     pageContext: row.page_context,
     createdAt: row.created_at,
   }));

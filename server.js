@@ -225,7 +225,7 @@ app.delete('/api/history/:id', async (req, res) => {
 
 // POST /api/feedback
 app.post('/api/feedback', async (req, res) => {
-  const { deviceId, rating, message, pageContext } = req.body;
+  const { deviceId, rating, message, pageContext, role } = req.body;
 
   if (!message || typeof message !== 'string' || message.trim() === '') {
     return res.status(400).json({ error: 'message is required and must be a non-empty string' });
@@ -236,9 +236,12 @@ app.post('/api/feedback', async (req, res) => {
   if (rating !== undefined && rating !== null && (typeof rating !== 'number' || rating < 1 || rating > 5)) {
     return res.status(400).json({ error: 'rating must be a number between 1 and 5' });
   }
+  if (role !== undefined && role !== null && typeof role !== 'string') {
+    return res.status(400).json({ error: 'role must be a string' });
+  }
 
   try {
-    const id = await saveFeedback(deviceId, rating, message.trim(), pageContext);
+    const id = await saveFeedback(deviceId, rating, message.trim(), pageContext, role);
     return res.status(200).json({ id, success: true });
   } catch (error) {
     console.error('[Server] Feedback save error:', error.message);
