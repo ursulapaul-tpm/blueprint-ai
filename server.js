@@ -5,6 +5,7 @@ const cors = require('cors');
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
+const rateLimit = require('express-rate-limit');
 const { runPipeline, applyArchitectureChoice } = require('./orchestrator');
 const { parseDocument } = require('./utils/parseDocument');
 const { extractIdeaFromDocument } = require('./agents/extraction');
@@ -12,6 +13,42 @@ const { saveBlueprint, getHistoryForDevice, deleteBlueprint, saveFeedback, getAl
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Trust the first proxy hop (Render sits behind a reverse proxy) so req.ip
+// reflects the real client IP, not Render's internal proxy address.
+app.set('trust proxy', 1);
+
+// Rate limiter — protects expensive blueprint generation endpoints from abuse.
+// Each generation triggers 5 real Claude API calls, so this directly protects API spend.
+const RATE_LIMIT_MESSAGE = 'You\'ve reached the limit of 5 blueprint generations per hour. Please try again later.';
+
+const blueprintLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 5, // 5 generations per IP per hour
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: RATE_LIMIT_MESSAGE },
+  keyGenerator: (req) => req.ip,
+});
+
+// Same limit, but for the SSE streaming endpoint — sends a properly formatted
+// SSE event on rate-limit instead of a raw HTTP 429 (which EventSource can't parse).
+const streamRateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.ip,
+  handler: (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+    res.write(`event: error\n`);
+    res.write(`data: ${JSON.stringify({ error: RATE_LIMIT_MESSAGE })}\n\n`);
+    res.end();
+  },
+});
 
 // Multer config — temp storage for uploaded documents
 const upload = multer({
@@ -42,7 +79,7 @@ app.get('/health', (req, res) => {
 });
 
 // POST /api/blueprint
-app.post('/api/blueprint', async (req, res) => {
+app.post('/api/blueprint', blueprintLimiter, async (req, res) => {
   const { productIdea, additionalContext } = req.body;
 
   // Validate presence and type
@@ -79,7 +116,7 @@ app.post('/api/blueprint', async (req, res) => {
 });
 
 // GET /api/blueprint-stream — same pipeline, but streams live progress via Server-Sent Events
-app.get('/api/blueprint-stream', async (req, res) => {
+app.get('/api/blueprint-stream', streamRateLimiter, async (req, res) => {
   const { productIdea, additionalContext } = req.query;
 
   if (!productIdea || typeof productIdea !== 'string' || productIdea.trim() === '') {
